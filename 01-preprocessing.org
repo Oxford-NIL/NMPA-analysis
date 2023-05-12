@@ -1,0 +1,225 @@
+#+TITLE: Preprocessing of the NMPA UID dataset
+#+AUTHOR: Aaron Ceross
+#+DATE:
+#+OPTIONS: ':true *:true toc:nil
+
+** Introduction
+
+The Chinese National Medical Products Administration (NMPA) is the
+medical device regulator for the People's Republic of China. In 2020
+the NMPA released its universal ID (UID) database for public use. In
+this exploratory analysis, we are going to understand what is
+available from the data and what sort of analysis we are able to do
+with it. At the end, we will posit hypothesis as well as machine
+learning tasks for future research.
+
+** Data acquisition
+
+The data is available from: https://udi.nmpa.gov.cn/download.html. It
+can be downloaded manually, which might be useful as the entire zip
+file is over 500MB in size. A small script is provided to automate
+this but it has often failed.
+
+#+begin_src R :session :cache yes :tangle yes
+  dl_link <- "https://udid.nmpa.gov.cn/attachments/attachment/download.html?path=A2E0C4E371D356DC134BE4F49B806211AF5D12A4AF10DF79C79DB42EA17E352B5A30FC069517944FC95D040BEA797CF317BBBE5A47488813469488D93792AE6C41D7A38E5971F49B"
+
+  data_dir <- "../data/"
+  if (!dir.exists(data_dir))
+    dir.create(data_dir)
+  uid_zip <- download.file(dl_link, destfile = paste0(data_dir, "uid.zip"))
+  unzip(uid_zip, exdir = data_dir)
+#+end_src
+
+** Merging the data sets together
+
+The data comes as part of 490 Microsoft Excel files. Each file has
+five tabs. These need to be concatenated together as a single
+dataframe.
+
+#+begin_src R :session :cache yes :tangle yes
+  library(tidyverse)
+  library(readxl)
+
+  uid_files <- list.files("../data/uid/", full.names = TRUE)
+  uid <- uid_files |>
+    purrr::map_df(
+             .x, .f = ~ read_excel(.x) |>
+                   dplyr::mutate(
+                            "source" = basename(.x)
+                          , "mod_dT" = file.info(.x)$mtime
+                          ))
+
+  output_dir <- "../output/"
+  if (!dir.exists(output_dir))
+    dir.create(output_dir)
+  saveRDS(uid, paste0(output_dir, "uid_", lubridate::today(), ".rds"))
+#+end_src
+
+** Renaming variables
+
+These variables have been translated using online tools (e.g., Google
+Translate). These translations need to be checked with native speakers
+to ensure proper identification.
+
+#+begin_src R :session :cache yes :tangle yes
+  uid <- uid |>
+    dplyr::rename(primary_key       = "主键编号"
+                , version           = "公开的版本号"
+                , version_date      = "版本的发布时间"
+                , version_status    = "版本的状态"
+                , min_sales_prod_id = "最小销售单元产品标识"
+                , prod_id_system_name = "产品标识编码体系名称"
+                , prod_id_release_date = "产品标识发布日期"
+                , min_num_sales_unit = "最小销售单元中使用单元的数量"
+                , use_unit_prod_labels = "使用单元产品标识"
+                , logo_carrier = "标识载体"
+                , consistent_prod_logo =  `是否与注册/备案产品标识一致`
+                , registration = `注册/备案产品标识`
+                , body_id = 是否有本体标识
+                , onto_prod_id = "本体产品标识"
+                , generic_name = `产品名称/通用名称`
+                , prod_name = 商品名称
+                , specs = "规格型号"
+                , package = `是否为包类/组套类产品`
+                , prod_description = "产品描述"
+                , prod_number = "产品货号或编号"
+                , origin_class_code = "原分类编码"
+                , device_category = "器械类别"
+                , classification_code = "分类编码"
+                , registrant_name = `医疗器械注册人/备案人名称`
+                , english_registrant_name = `医疗器械注册人/备案人英文名称`
+                , usic = "统一社会信息代码"
+                , record_certificate_number = "注册证编号或者备案凭证编号"
+                , prod_category = "产品类别"
+                , mr_safety = `磁共振（MR）安全相关信息`
+                , one_time_use = "是否标记为一次性使用"
+                , max_reuse = "最大重复使用次数"
+                , sterile_package = "是否为无菌包装"
+                , sterile_use = "使用前是否需要进行灭菌"
+                , sterile_method = "灭菌方式"
+                , url_info = "其他信息的网址链接"
+                , class_code_medical_insurance = "医保耗材分类编码"
+                , prod_id_contains_batch_num = "生产标识是否包含批号"
+                , prod_id_contains_serial_num = "生产标识是否包含序列号"
+                , prod_label_contain_prod_date = "生产标识是否包含生产日期"
+                , prod_id_include_expiration_date = "生产标识是否包含失效日期"
+                , special_conditions = "特殊储存或操作条件"
+                , special_size_instructions = "特殊尺寸说明"
+                , delisting_date = "退市日期"
+                , prod_id_status = "产品标识状态"
+                  )
+  output_dir <- "../output"
+  saveRDS(uid, paste0(output_dir, "uid_rename.rds"))
+#+end_src
+
+** Correcting column types
+
+#+begin_src R :session :cache yes :tangle yes
+  uid <- uid |>
+    dplyr::mutate(version_date = lubridate::ymd(version_date)
+                , prod_id_release_date = lubridate::ymd(prod_id_release_date)
+                , version_status = as.factor(version_status)
+                , min_num_sales_unit = as.numeric(min_num_sales_unit)
+                , consistent_prod_logo = as.factor(consistent_prod_logo)
+                , prod_category = as.factor(prod_category)
+                  )
+#+end_src
+
+** Subsetting medical device software
+
+All SAMD are identified through the classification code starting with
+"21". SIMD are not readily identified by the codes so the approach is
+to search for "软件" in the product description. We then join the two
+datasets together and remove any overlap.
+
+#+begin_src R :session :cache yes :tangle yes
+  samd <-
+    udi |>
+    dplyr::filter(stringr::str_detect(classification_code, pattern = "^21-"))
+
+  software <-
+    udi |>
+    dplyr::filter(stringr::str_detect(prod_description, pattern = "软件"))
+
+  total_software <-
+    dplyr::bind_rows(samd, software)
+
+  nrow(samd) + nrow(software) == nrow(total_software)
+
+  final_df <- total_software[!duplicated(total_software), ]
+#+end_src
+
+** Identifying origin of the device, year of registration, and risk category
+
+The registration certificate number (注册证编号或者备案凭证编号) is
+information rich; it contains details of as to where the device
+originates, the year of registration, as well as the risk
+category. Registrations with "号" at the end signify that the products
+are components. The first four digits are the year of registration,
+the number after the year is the risk category. There are three risk
+categories (Classes I, II, and III). The presence of one of the
+characters in the table below indicate where the device comes from:
+
+| Indicative character | Pīnyīn | Meaning                                     |
+|----------------------+--------+---------------------------------------------|
+| 准                   | Zhǔn   | Domestic product                            |
+| 进                   | Jìn    | Imported product                            |
+| 许                   | Xǔ     | Originates from Hong Kong, Macao, or Taiwan |
+
+Our merged data set does not have the SIMD labelled, so we reidentify
+which software is SAMD (through the 21 prefixed classification code)
+and assume that any that do not have this code prefix are SIMD.
+
+#+begin_src R :session :cache yes :tangle yes
+  mdsw <-
+    final_df |>
+    dplyr::mutate(type = case_when(
+                    stringr::str_detect(classification_code, pattern = "^21-") ~ "SAMD"
+                  , TRUE ~ "SIMD"
+                  )) |>
+    dplyr::mutate(type = as.factor(type)) |>
+    dplyr::filter(!stringr::str_detect(record_certificate_number, "号")) |>
+    dplyr::mutate(import_status = case_when(
+                grepl("准", record_certificate_number) ~ "domestic"
+              , grepl("进", record_certificate_number) ~ "imported"
+              , grepl("许", record_certificate_number) ~ "SAR"
+              , TRUE ~ "N"  # this assigns N to unidentifiable records
+              )) |>
+    dplyr::mutate(import_status = as.factor(import_status))  |>
+    dplyr::filter(import_status != "N") |>
+    dplyr::mutate(import_status = droplevels.factor(import_status)) |>
+    dplyr::mutate(risk_class = substr(record_certificate_number, 9, 9)) |>
+    dplyr::mutate(risk_class = case_when(
+                    grepl("1", risk_class) ~ "Class I"
+                  , grepl("2", risk_class) ~ "Class II"
+                  , grepl("3", risk_class) ~ "Class III"
+                  )) |>
+    dplyr::mutate(risk_class = as.factor(risk_class))
+#+end_src
+
+Further device origin details can be discerned from the first
+character of the registration certificate number. The characters
+relate not only to the origin by the device class.
+
+#+begin_src R :session :cache yes :tangle yes
+  mdsw <-
+    mdsw |>
+    dplyr::mutate(city = stringr::str_extract(record_certificate_number, pattern = "^\\w{1}")) |>
+    dplyr::mutate(city = as.factor(city))
+
+  print(unique(mdsw$city))
+#+end_src
+
+Within this data, there are instances where the 粵 variant character
+for yuè is used instead of the more common 粤. We collapse these
+together in our data set, as this is very likely a mishap of character
+selection.
+
+#+begin_src R :session :cache yes :exports none :tangle yes
+  mdsw <-
+    mdsw |>
+    dplyr::mutate(city = forcats::fct_collapse(city, "粤" = c("粤", "粵"))) |>
+    droplevels.data.frame()  # remove unused factor level
+
+  saveRDS(mdsw, "../output/mdsw.rds")
+#+end_src
