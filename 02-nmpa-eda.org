@@ -1,0 +1,249 @@
+#+TITLE: 02 NMPA UDI Exploratory Data Analysis
+#+AUTHOR: Aaron Ceross
+#+DATE:
+#+OPTIONS: ':true *:true toc:nil
+
+** Goals
+
+The aim of this notebook is to detail the variables available in the
+NMPA UID database. This dataset is provided by the `01 Preprocessing`
+notebook, which explains how this dataset was put together for
+analysis.
+
+** Data description
+
+#+begin_src R :session :cache yes :results silent :tangle yes
+  library(tidyverse)
+
+  raw_mdsw <- readRDS("../output/mdsw.rds")
+#+end_src
+
+|------------------------------+-------------------------------+------------------------------------------------------|
+| Name                         | Original Chinese name         | Description                                          |
+|------------------------------+-------------------------------+------------------------------------------------------|
+| =primary_key=                  | 主键编号                      | Key for the dataset                                  |
+| =version=                      | 公开的版本号                  | Current version of the product                       |
+| =version_date=                 | 版本的发布时间                |                                                      |
+| =version_status=               | 版本的状态                    | Either 新增 (xīn zēng, new) or 更新 (gēngxīn, renew) |
+| =min_sales_prod_id=            | 最小销售单元产品标识          |                                                      |
+| =prod_id_system_name=          | 产品标识编码体系名称          |                                                      |
+| =prod_id_release_date=         | 产品标识发布日期              |                                                      |
+| =min_num_sales_unit=           | 最小销售单元中使用单元的数量  |                                                      |
+| =use_unit_prod_labels=         | 使用单元产品标识              |                                                      |
+| =logo_carrier=                 | 标识载体                      |                                                      |
+| =consistent_prod_logo=         | 是否与注册/备案产品标识一致   |                                                      |
+| =registration=                 | 注册/备案产品标识             |                                                      |
+| =body_id=                      | 是否有本体标识                |                                                      |
+| =onto_prod_id=                 | 本体产品标识                  |                                                      |
+| =generic_name=                 | 产品名称/通用名称             |                                                      |
+| =prod_name=                    | 商品名称                      |                                                      |
+| =specs=                        | 规格型号                      |                                                      |
+| =package=                      | 是否为包类/组套类产品         |                                                      |
+| =prod_description=             | 产品描述                      |                                                      |
+| =prod_number=                  | 产品货号或编号                |                                                      |
+| =origin_class_code=            | 原分类编码                    |                                                      |
+| =device_category=              | 器械类别                      |                                                      |
+| =classification_code=          | 分类编码                      |                                                      |
+| =registrant_name=              | 医疗器械注册人/备案人名称     |                                                      |
+| =english_registrant_name=      | 医疗器械注册人/备案人英文名称 |                                                      |
+| =usic=                         | 统一社会信息代码              |                                                      |
+| =record_certificate_number=    | 注册证编号或者备案凭证编号    |                                                      |
+| =prod_category=                | 产品类别                      |                                                      |
+| =mr_safety=                    | 磁共振（MR）安全相关信息      |                                                      |
+| =one_time_use=                 | 是否标记为一次性使用          |                                                      |
+| =max_resuse=                   | 最大重复使用次数              |                                                      |
+| =sterile_package=              | 是否为无菌包装                |                                                      |
+| =sterile_method=               | 灭菌方式                      |                                                      |
+| =url_info=                     | 其他信息的网址链接            |                                                      |
+| =class_code_medical_insurance= | 医保耗材分类编码              |                                                      |
+| =prod_id_status=               |                               | All rows are 已发布 (yǐ fābù, published)             |
+
+** Naming the kinds of devices in the dataset
+
+The UDI =classification_code= is a six-digit identifier as to what type
+the medical device is.
+
+#+begin_src R :session :cache yes :results raw :tangle yes
+  print(paste0("Number of unique classification codes: ", length(unique(raw_mdsw$classification_code))))
+#+end_src
+
+Number of unique classification codes: 241
+
+*** Feature engineering
+
+We manually annotate these providing both the Chinese and English
+names for these codes:
+
+#+begin_src R :session :cache yes :tangle yes
+  unique(raw_mdsw$classification_code) |>
+    write.csv("../output/class_codes.csv")
+#+end_src
+
+*** Data quality check
+
+Databases can contain bad quality values. We want to be able to check
+for this prior to the analysis.
+
+#+begin_src R :session :cache yes :tangle yes
+  codes <- readr::read_csv("../data/class_codes - class_codes.csv.csv") |>
+    select(-1)
+#+end_src
+
+During labelling, some codes were not found.
+
+#+begin_src R :session :cache yes :results raw :tangle yes
+  print(paste0("Number of bad codes: ", sum(is.na(codes$english))))
+#+end_src
+
+Number of bad codes: 25
+
+There is a remaining question of how many devices this affects. We
+have to investigate this after the labels are merged into the medical
+device software dataset.
+
+*** Merging labels into the dataset
+
+We perform a full join merge of the data so that devices are not lost.
+
+#+begin_src R :session :cache yes :results silent :tangle yes
+    mdsw <-
+      dplyr::full_join(
+               codes
+             , raw_mdsw
+             , by = c("class_code" = "classification_code")
+             )
+#+end_src
+
+**** Errors in =classification_code=
+
+As a first step, we are interested in which types of devices are most
+effected by the malformed classification codes.
+
+#+begin_src R :session :cache yes :results raw :tangle yes
+  print(paste0("Number of devices with bad classification codes: ", sum(is.na(mdsw$english))))
+#+end_src
+
+Number of devices with bad classification codes: 98
+
+The errors affect 3.42% of the data set. In order to isolate the
+effect, we consider the =type= (SaMD vs SiMD), =import_status=, and
+=risk_class=.
+
+#+begin_src R :session :cache yes :results raw :tangle yes
+  {print(paste0("Number of SIMDs affected: ", sum(is.na(mdsw[mdsw$type == "SIMD",]$english))))
+  print(paste0("Number of SAMDs affected: ", sum(is.na(mdsw[mdsw$type == "SAMD",]$english))))
+  print(paste0("Number of domestic devices affected: ", sum(is.na(mdsw[mdsw$import_status == "domestic", ]$english))))
+  print(paste0("Number of imported devices affected: ", sum(is.na(mdsw[mdsw$import_status == "imported", ]$english))))}
+#+end_src
+
+Number of SIMDs affected: 73
+Number of SAMDs affected: 25
+Number of domestic devices affected: 94
+Number of imported devices affected: 4
+
+Presented graphically, divided by risk class:
+
+#+begin_src R :session :cache yes :tangle yes
+    mdsw |>
+      dplyr::filter(is.na(english)) |>
+      dplyr::group_by(type, import_status, risk_class) |>
+      dplyr::tally() |>
+      dplyr::arrange(desc(n)) |>
+      ggplot(aes(x = type, y = n, fill = import_status)) +
+      geom_bar(stat = "identity") +
+      geom_text(aes(label = n), vjust = -1.5, size = 4) +
+      facet_grid(~ risk_class) +
+      labs(x = "Type of medical software device", y = "Number of devices") +
+      scale_fill_brewer(name = "Import Status"
+                      , palette = "Set2"
+                      , label = c("Domestic", "Imported")) +
+      theme_minimal() +
+      theme(
+        axis.text = element_text(size = 14, colour = "black")
+      , axis.title = element_text(size = 15)
+      , legend.position = "top"
+      , legend.text = element_text(colour = "black", size = 12)
+      , strip.text = element_text(colour = "black", size = 13)
+      )
+    ggsave("../figures/class_code_errors.pdf")
+    ggsave("../figures/class_code_errors.png", dpi = "retina")
+#+end_src
+
+#+attr_org: :height 60% :width 60%
+[[../figures/class_code_errors.png]]
+
+
+** Sub-setting the UDI data for software and AI products
+
+There are no flags within the dataset to signify that a product is
+entirely composed of software nor whether it is software which makes
+use of artificial intelligence. However the NMPA as set out naming
+rules related to these device types.
+
+We search for the following terms in both the =generic_name= and
+=prod_description=:
+
+| 中文     | Pīnyīn          | English                 |
+|----------+-----------------+-------------------------|
+| 软件     | Ruǎnjiàn        | Software                |
+| 人工智能 | Réngōng zhìnéng | Artificial intelligence |
+| 机器学习 | Jīqì xuéxí      | Machine learning        |
+| 深度学习 | Shēndù xuéxí    | Deep learning           |
+| 强化学习 | Qiánghuà xuéxí  | Reinforcement learning  |
+| 辅助     | Fǔzhù           | Auxillery               |
+
+#+begin_src R :session :cache yes :results raw :tangle yes
+  search_terms <-
+    c("人工智能", "机器学习", "深度学习", "强化学习", "辅助")
+
+  fields <- c("generic_name", "prod_description")
+
+  num_devices <- function(term, field) {
+    mdsw |>
+      dplyr::filter(
+               stringr::str_detect(string = get(field)
+                                 , pattern = term)) |>
+      nrow()
+  }
+
+  output <- vector()
+  for (i in search_terms) {
+    for (j in fields) {
+      devices <- num_devices(i, j)
+      output <- c(output, paste0("Number of ", i, ":   ", devices, " in ", j))
+    }
+  }
+  print(output)
+#+end_src
+
+| Term     | Generic name | Product Description |
+|----------+--------------+---------------------|
+| 人工智能 |              |                     |
+| 机器学习 |              |                     |
+| 深度学习 |              |                  14 |
+| 强化学习 |              |                     |
+| 辅助     |           39 |                 159 |
+
+We have identified a number of devices and export these for manual
+verification and further manual labelling.
+
+#+begin_src R :session :cache yes :tangle yes
+  mdsw |>
+    dplyr::filter(
+             stringr::str_detect(string = prod_description, pattern =  "深度学习")
+           | stringr::str_detect(string = prod_description, pattern =  "辅助")
+           | stringr::str_detect(string = generic_name,     pattern =  "辅助")) |>
+    dplyr::select(
+             primary_key
+           , record_certificate_number
+           , class_code
+           , prod_name
+           , generic_name
+           , prod_description
+           , risk_class
+           , type
+           , import_status
+           , version_date
+           , city) |>
+    write.csv("../output/ai_products.csv")
+#+end_src

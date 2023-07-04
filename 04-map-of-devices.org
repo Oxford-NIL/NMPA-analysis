@@ -1,0 +1,246 @@
+#+TITLE: Map of SaMD and AIMD in China
+#+AUTHOR: Aaron Ceross
+#+DATE:
+#+OPTIONS: ':true *:true toc:nil
+
+In this notebook, we are going to make a map visualising the areas
+where SaMD and AIMD are registered in China.
+
+** Loading data
+
+This map will use the total medical device software created in
+previous notebooks.
+
+#+begin_src R :session :cache yes :exports none :tangle yes
+  library(tidyverse)
+
+  mdsw <- readRDS("../output/mdsw.rds")
+#+end_src
+
+** Loading map
+
+#+begin_src R :session :cache yes :exports none :tangle yes
+  library(sp)
+  library(rgdal)
+  library(data.table)
+
+  china_map <- rgdal::readOGR("../data/bou2_4p.shp")
+
+  china_map_data = data.table::setDT(china_map@data)
+
+  # extract province information from shap file
+  china_map_data = data.table::setDT(china_map@data)
+  data.table::setnames(china_map_data, "NAME", "province")
+  # transform to UTF-8 coding format
+  china_map_data[, province:=iconv(province, from = "GBK", to = "UTF-8")]
+  # create id to join province back to lat and long, id = 0 ~ 924
+  china_map_data[, id:= .I-1] # id = 0, 1, 2, ... , used to match to `dt_china`
+  # there are more shapes for one province due to small islands
+  china_map_data[, province:= as.factor(province)]
+  china_map_data <- china_map_data[!is.na(province)]
+  china_map_data <- china_map_data[AREA > 0.1]
+  head(china_map_data, 3)
+  dt_china <- data.table::setDT(fortify(china_map))
+  head(dt_china, 3)
+
+  dt_china[, id:= as.numeric(id)]
+  setkey(china_map_data, id); setkey(dt_china, id)
+  dt_china <- china_map_data[dt_china]
+#+end_src
+
+#+RESULTS[2bfa087faecdd6adfa2399f3991cabb2b7c7ed01]:
+
+** COMMENT Transposing the SaMD data to the map
+
+The provincial names in the map need to be translated into English for
+publication.
+
+#+begin_src R :session :cache yes :tangle yes
+  province_CH <- china_map_data[, levels(province)] # the CH are in UTF-8 code
+  province_EN <- c("Shanghai"
+                 , "Yunnan"
+                 , "Inner Mongolia"
+                 , "Beijing"
+                 , "Taiwan"
+                 , "Jilin"
+                 , "Sichuan"
+                 , "Tianjin"
+                 , "Ningxia"
+                 , "Anhui"
+                 , "Shandong"
+                 , "Shanxi"
+                 , "Guangdong"
+                 , "Guangxi"
+                 , "Xinjiang"
+                 , "Jiangsu"
+                 , "Jiangxi"
+                 , "Hebei"
+                 , "Henan"
+                 , "Zhejiang"
+                 , "Hainan"
+                 , "Hubei"
+                 , "Hunan"
+                 , "Gansu"
+                 , "Fujian"
+                 , "Tibet"
+                 , "Guizhou"
+                 , "Liaoning"
+                 , "Chongqing"
+                 , "Shaanxi"
+                 , "Qinghai"
+                 , "Hong Kong"
+                 , "Heilongjiang")
+#+end_src
+
+The next step is to create a table of values. We start with the =city=
+variable, that tells us the general location of where the device was
+registered.
+
+#+begin_src R :session :cache yes :tangle yes
+  map_data <-
+    mdsw |>
+    dplyr::mutate(pinyin = case_when(
+                    city == "京" ~ "Beijing"
+                  , city == "冀" ~ "Hebei"
+                  , city == "内" ~ "Inner Mongolia"
+                  , city == "吉" ~ "Jilin"
+                  , city == "国" ~ "National"
+                  , city == "川" ~ "Sichuan"
+                  , city == "桂" ~ "Guanxi"
+                  , city == "沪" ~ "Shanghai"
+                  , city == "津" ~ "Tianjin"
+                  , city == "浙" ~ "Zhejiang"
+                  , city == "渝" ~ "Chongqing"
+                  , city == "湘" ~ "Hunan"
+                  , city == "滇" ~ "Yunnan"
+                  , city == "甘" ~ "Gansu"
+                  , city == "皖" ~ "Anhui"
+                  , city == "粤" ~ "Guangdong"
+                  , city == "苏" ~ "Jiangsu"
+                  , city == "豫" ~ "Henan"
+                  , city == "赣" ~ "jiangxi"
+                  , city == "辽" ~ "Liaoning"
+                  , city == "鄂" ~ "Hubei"
+                  , city == "闽" ~ "Fujian"
+                  , city == "陕" ~ "Shaanxi"
+                  , city == "鲁" ~ "Shandong"
+                  )) |>
+    dplyr::count(pinyin, city)
+#+end_src
+
+| Region         | ZH | Number of SaMD |
+|----------------+----+----------------|
+| Anhui          | 皖 |              9 |
+| Beijing        | 京 |             36 |
+| Chongqing      | 渝 |             13 |
+| Fujian         | 闽 |             15 |
+| Gansu          | 甘 |              2 |
+| Guangdong      | 粤 |            601 |
+| Guanxi         | 桂 |              1 |
+| Hebei          | 冀 |             15 |
+| Henan          | 豫 |             28 |
+| Hubei          | 鄂 |             31 |
+| Hunan          | 湘 |             14 |
+| Inner Mongolia | 内 |              2 |
+| Jiangsu        | 苏 |            127 |
+| jiangxi        | 赣 |              1 |
+| Jilin          | 吉 |             43 |
+| Liaoning       | 辽 |             46 |
+| National       | 国 |           1378 |
+| Shaanxi        | 陕 |              1 |
+| Shandong       | 鲁 |             15 |
+| Shanghai       | 沪 |            140 |
+| Sichuan        | 川 |             43 |
+| Tianjin        | 津 |             82 |
+| Yunnan         | 滇 |              2 |
+| Zhejiang       | 浙 |            209 |
+|                | 琼 |              4 |
+
+A left join is performed to merge the numerical values with the
+provincial names. The "National" field is omitted as this is
+registered in Beijing. There is a question as to why that is the case.
+
+#+begin_src R :session :cache yes :tangle yes
+  map_data <- map_data |>
+    dplyr::filter(pinyin != "National")
+
+  final_data <- dplyr::tibble(zh_name = province_CH, pinyin = province_EN)
+  final_data <- left_join(final_data, map_data, by = "pinyin") |>
+    dplyr::select(-city)
+  ##final_data <- replace(final_data, is.na(final_data), 0)
+#+end_src
+
+#+begin_src R :session :cache yes :tangle yes
+  input_data <- data.table(final_data)
+  data.table::setkey(input_data, zh_name)
+  data.table::setkey(dt_china, province)
+  dt_china <- input_data[dt_china, nomatch = NA]
+#+end_src
+
+** Plotting the map
+
+A helper function is needed to centre the text when labelling regions.
+
+#+begin_src R :session :cache yes :tangle yes
+  get_centroids <- function(data = dt1, long = "long", lat = "lat"
+  , by_var = "state"  # the grouping variable, e.g. state: get centroid by state
+  , fill_var = NULL   # the variable to plot
+    )
+  {
+    data <- data[!is.na(data[[by_var]]),]
+    data[[by_var]] <- as.character(data[[by_var]]) # sometimes there is empty factor level
+    dt1_df <- sp::SpatialPointsDataFrame(coords = data[, c(long, lat), with = FALSE], data = data)
+    dt1_geo <- by(dt1_df, dt1_df[[by_var]], function(x) {sp::Polygon(x[c(long, lat)])@labpt})
+    centroids <- stats::setNames(do.call("rbind.data.frame", dt1_geo), c(long, lat))
+    centroids$name <- names(dt1_geo)
+    if (!is.null(fill_var)) { # if need to join fill value
+      setkeyv(setDT(centroids), "name")
+      dt_var <- unique(data[,c(by_var, fill_var), with = FALSE])
+      setkeyv(dt_var, by_var)
+      centroids <- dt_var[centroids]
+    }
+    return(centroids)
+  }
+#+end_src
+
+#+begin_src R :session :cache yes :tangle yes
+  library(ggsn)
+
+  samd_map <-
+    dt_china |>
+    dplyr::filter(!is.na(pinyin)) |>
+    ggplot(aes(x = long, y = lat, group = group, fill = n)) +
+    labs(fill = "Number of regiseterd SaMD") +
+    geom_polygon(colour = "black") +
+    scale_fill_gradientn(
+      colours = RColorBrewer::brewer.pal(9, "YlGn")
+    , na.value = "grey85"
+    , guide = guide_colourbar(barwidth = 25
+                            , barheight = 0.4
+                            , title.position = "top")) +
+    labs(fill = "Number of SaMD registered", x = "Longitude", y = "Latitude") +
+    coord_map() +
+    ## map scale
+    ## ggsn::scalebar(data = dt_china
+    ##              , dist = 500
+    ##              , dist_unit = "km"
+    ##              , border.size = 0.4
+    ##              , st.size = 4
+    ##              , box.fill = c("black", "white")
+    ##              , transform = TRUE, model = "WGS84") +
+    theme_void() +
+    theme(legend.position = "bottom"
+        , legend.title = element_text(size = 12)  # font size of the legend
+        , legend.text=element_text(size = 10))
+  centroids_zh <- get_centroids(data = dt_china, by_var = "zh_name")
+  centroids_en <- get_centroids(data = dt_china, by_var = "pinyin")
+  samd_map
+  ## samd_map + shadowtext::geom_shadowtext(
+  ##                          data = centroids_en
+  ##                        , aes(x = long, y = lat, label = name)
+  ##                        , size = 5
+  ##                        , inherit.aes = FALSE
+  ##                        )
+#+end_src
+
+#+RESULTS[60676050ab7ae3a4aaa0a5ebcd003335968a6918]:

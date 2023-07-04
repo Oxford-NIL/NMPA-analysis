@@ -1,0 +1,204 @@
+#+TITLE: Analysis of AIMD devices in the UDI dataset
+#+AUTHOR: Aaron Ceross
+#+DATE:
+#+OPTIONS: ':true *:true toc:nil
+
+#+name: src-proprocess
+#+begin_src R :session :cache yes :results silent :tangle yes
+  library(tidyverse)
+
+  ai_prods <- readr::read_csv("../data/ai_products.csv") |>
+    dplyr::select(-1) |>
+    dplyr::distinct(record_certificate_number, .keep_all = TRUE) |>
+    dplyr::rename(pathway = `Registration special pathway`)
+  glimpse(ai_prods)
+#+end_src
+
+There are 92 unique devices in the data set. This notebook provides
+analysis and context about these devices.
+
+** What is the risk class for these devices?
+
+#+begin_src R :session :cache yes :results output raw :tangle yes
+  ai_prods |>
+    dplyr::count(risk_class) |>
+    dplyr::mutate(pct = n / sum(n)) |>
+    knitr::kable(digits = 3)
+#+end_src
+
+| risk_class |  n |   pct |
+|------------+----+-------|
+| Class II   | 18 | 0.196 |
+| Class III  | 74 | 0.804 |
+
+** REVISE How did the devices get to market?
+
+#+begin_src R :session :cache yes :results output raw :tangle yes
+  ai_prods |>
+    dplyr::count(pathway) |>
+    knitr::kable()
+#+end_src
+
+| pathway                                             |  n |
+|-----------------------------------------------------+----|
+| NA                                                  | 90 |
+| 创新医疗器械产品 Innovative medical device products |  2 |
+
+- What does it mean to not have a pathway?
+- What does the innovative medical device pathway entail in terms of
+  process?
+
+** Where do the devices come from and what is their risk class?
+
+
+#+begin_src R :session :cache yes :results output raw :tangle yes
+  ai_prods |>
+    dplyr::count(risk_class, import_status, city) |>
+    dplyr::mutate(pct = n / sum(n)) |>
+    dplyr::arrange(desc(n)) |>
+    knitr::kable(digits = 2)
+#+end_src
+
+| risk_class | import_status | city |  n |  pct |
+|------------+---------------+------+----+------|
+| Class III  | domestic      | 国   | 59 | 0.64 |
+| Class III  | imported      | 国   | 15 | 0.16 |
+| Class II   | domestic      | 浙   |  3 | 0.03 |
+| Class II   | domestic      | 粤   |  3 | 0.03 |
+| Class II   | domestic      | 鄂   |  3 | 0.03 |
+| Class II   | domestic      | 川   |  2 | 0.02 |
+| Class II   | domestic      | 沪   |  2 | 0.02 |
+| Class II   | imported      | 国   |  2 | 0.02 |
+| Class II   | domestic      | 国   |  1 | 0.01 |
+| Class II   | domestic      | 津   |  1 | 0.01 |
+| Class II   | domestic      | 豫   |  1 | 0.01 |
+
+#+begin_src R :session :cache yes :exports none :tangle yes
+  library(showtext)
+  showtext_auto()
+
+  ai_prods |>
+    dplyr::filter(import_status != "imported") |>
+    dplyr::group_by(city, speciality, risk_class) |>
+    dplyr::summarise(n = n()) |>
+    dplyr::arrange(desc(n)) |>
+    ggplot(aes(y = n, x = city)) +
+    geom_bar(stat = "identity") +
+    facet_wrap(~risk_class) +
+    theme(axis.text = element_text(size = 14, colour = "black")) +
+    labs(x = "Origin", y = "Number of AI medical devices")
+#+end_src
+
+
+** In what domains in AI being deployed?
+
+#+begin_src R :session :cache yes :results output raw :tangle yes
+  ai_prods |>
+    dplyr::mutate(speciality = as.factor(speciality)) |>
+    dplyr::mutate(speciality = forcats::fct_lump_n(speciality, 5)) |>
+    dplyr::group_by(speciality) |>
+    dplyr::summarise(n = n()) |>
+    dplyr::mutate(pct = n / sum(n)) |>
+    dplyr::arrange(desc(n)) |>
+    knitr::kable(col.names = c("Medical Speciality", "Number", "Percent")
+                 , digits = 2)
+#+end_src
+
+| Medical Speciality | Number | Percent |
+|--------------------+--------+---------|
+| Radiology          |     24 |    0.26 |
+| Dental             |     23 |    0.25 |
+| Other              |     13 |    0.14 |
+| Orthopaedic        |     10 |    0.11 |
+| Pathology          |      7 |    0.08 |
+| Cardiology         |      5 |    0.05 |
+| General hospital   |      5 |    0.05 |
+| Ophthalmology      |      5 |    0.05 |
+
+** What kinds of AI is being used in these devices?
+
+#+begin_src R :session :cache yes :results output raw :tangle yes
+  ai_prods |>
+    dplyr::group_by(algorithm) |>
+    dplyr::summarise(n = n()) |>
+    dplyr::mutate(pct = n / sum(n)) |>
+    dplyr::arrange(desc(n)) |>
+    knitr::kable(col.names = c("Algorithm", "Number", "Percent")
+               , digits = 2)
+#+end_src
+
+| Algorithm     | Number | Percent |
+|---------------+--------+---------|
+| Unknown       |     76 |   0.826 |
+| Deep Learning |     15 |   0.163 |
+| CAD algorithm |      1 |   0.011 |
+
+*** Of the known algorithms, which speciality are they in?
+
+#+begin_src R :session :cache yes :results output raw :tangle yes
+  ai_prods |>
+    dplyr::filter(!is.na(algorithm)) |>
+    dplyr::group_by(algorithm, speciality) |>
+    dplyr::summarise(n = n()) |>
+    dplyr::arrange(desc(n)) |>
+    knitr::kable()
+#+end_src
+
+| algorithm     | speciality    | n |
+|---------------+---------------+---|
+| Deep Learning | Radiology     | 9 |
+| Deep Learning | Orthopaedic   | 3 |
+| Deep Learning | Ophthalmology | 2 |
+| CAD algorithm | Radiology     | 1 |
+| Deep Learning | Cardiology    | 1 |
+
+Radiology accounts for 60% of these applications
+
+*** Where do these devices come from?
+
+#+begin_src R :session :cache yes :results output raw :tangle yes
+    ai_prods |>
+      dplyr::filter(!is.na(algorithm)) |>
+      dplyr::count(import_status, city, risk_class) |>
+      knitr::kable()
+#+end_src
+
+| import_status | city | risk_class |  n |
+|---------------+------+------------+----|
+| domestic      | 国   | Class III  | 16 |
+
+*** Domestic vs Imported plot numbers
+
+NOTE: This is the total =mdsw= data set.
+
+#+begin_src R :session :cache yes :results output raw :tangle yes
+  final_df <- readRDS("../output/findal_df.rds")
+
+  final_df |>
+    dplyr::group_by(import_status, type, AI, risk_class) |>
+    dplyr::summarise(n = dplyr::n()) |>
+    dplyr::mutate(pct = n / sum(n)) |>
+    dplyr::arrange(dplyr::desc(n)) |>
+    knitr::kable(digits = 3)
+#+end_src
+
+| import_status | type | AI     | risk_class |   n |   pct |
+|---------------+------+--------+------------+-----+-------|
+| domestic      | SIMD | Non-AI | Class II   | 440 | 0.582 |
+| domestic      | SIMD | Non-AI | Class III  | 309 | 0.409 |
+| imported      | SIMD | Non-AI | Class III  | 196 | 0.820 |
+| domestic      | SAMD | Non-AI | Class II   | 106 | 0.815 |
+| imported      | SIMD | Non-AI | Class II   |  43 | 0.180 |
+| domestic      | SAMD | AI     | Class III  |  32 | 0.865 |
+| domestic      | SIMD | AI     | Class III  |  27 | 0.730 |
+| imported      | SAMD | Non-AI | Class III  |  26 | 0.812 |
+| domestic      | SAMD | Non-AI | Class III  |  23 | 0.177 |
+| imported      | SIMD | AI     | Class III  |  14 | 0.875 |
+| domestic      | SIMD | AI     | Class II   |  10 | 0.270 |
+| domestic      | SIMD | Non-AI | Class I    |   7 | 0.009 |
+| imported      | SAMD | Non-AI | Class II   |   6 | 0.188 |
+| domestic      | SAMD | AI     | Class II   |   5 | 0.135 |
+| imported      | SIMD | AI     | Class II   |   2 | 0.125 |
+| domestic      | SAMD | Non-AI | Class I    |   1 | 0.008 |
+| imported      | SAMD | AI     | Class III  |   1 | 1.000 |
+| SAR           | SIMD | Non-AI | Class II   |   1 | 1.000 |
